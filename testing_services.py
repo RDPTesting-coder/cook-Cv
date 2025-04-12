@@ -1,12 +1,27 @@
 import os
+import sys
 import csv
 import ctypes
-import sys
 
-# ==== Config: Change this path to your NAS location ====
-csv_path = r"\\NAS\your\folder\services_output.csv"  # use raw string for UNC paths
+# === CONFIG: Set your NAS path here ===
+csv_path = r"\\NAS\your\folder\services_output.csv"  # Update to your real path
 
-# ==== Admin Check ====
+# === Helper: Python 2/3 compatibility ===
+PY2 = sys.version_info[0] == 2
+
+def u(text):
+    if PY2:
+        return text.decode('utf-8') if isinstance(text, str) else text
+    else:
+        return text
+
+def b(text):
+    if PY2:
+        return text.encode('utf-8') if isinstance(text, unicode) else text
+    else:
+        return text
+
+# === Check if script is run as Administrator ===
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
@@ -17,7 +32,7 @@ if not is_admin():
     print("❌ This script must be run as Administrator.")
     sys.exit(1)
 
-# ==== Get Services (same as before) ====
+# === Get Services Info ===
 output = os.popen('sc queryex type= service state= all').read().splitlines()
 
 services = []
@@ -33,13 +48,13 @@ for line in output:
     elif line.startswith("DISPLAY_NAME:"):
         service['DISPLAY_NAME'] = line.split(":", 1)[1].strip()
     elif line.startswith("STATE"):
-        parts = line.split(":")[1].strip().split()
+        parts = line.split(":", 1)[1].strip().split()
         service['STATE'] = parts[1] if len(parts) > 1 else parts[0]
 
 if service:
     services.append(service)
 
-# ==== Add START_NAME and START_TYPE ====
+# === Get START_NAME and START_TYPE ===
 for svc in services:
     name = svc['SERVICE_NAME']
     qc_output = os.popen('sc qc "%s"' % name).read()
@@ -49,30 +64,41 @@ for svc in services:
         if "SERVICE_START_NAME" in line:
             svc['START_NAME'] = line.split(":", 1)[1].strip()
         elif "START_TYPE" in line:
-            start_type_code = line.split(":")[1].strip()
-            if "2" in start_type_code:
+            val = line.split(":", 1)[1].strip().lower()
+            if "2" in val:
                 svc['START_TYPE'] = "Automatic"
-            elif "3" in start_type_code:
+            elif "3" in val:
                 svc['START_TYPE'] = "Manual"
-            elif "4" in start_type_code:
+            elif "4" in val:
                 svc['START_TYPE'] = "Disabled"
-            elif "delayed-auto" in start_type_code.lower():
+            elif "delayed-auto" in val:
                 svc['START_TYPE'] = "Automatic (Delayed Start)"
 
-# ==== Write to CSV (create if not exist) ====
+# === Write to CSV on NAS ===
 file_exists = os.path.isfile(csv_path)
+system_name = os.environ.get('COMPUTERNAME', 'Unknown')
 
-# Open in append mode
-with open(csv_path, "ab") as f:  # 'ab' for binary append in Python 2
+# Open differently based on Python version
+if PY2:
+    f = open(csv_path, "ab")  # binary mode in Py2
+else:
+    f = open(csv_path, "a", newline='', encoding='utf-8')  # text mode in Py3
+
+with f:
     writer = csv.writer(f)
     if not file_exists:
-        writer.writerow(["SYSTEM_NAME", "DISPLAY_NAME", "STATE", "START_NAME", "START_TYPE"])
-    system_name = os.environ['COMPUTERNAME']
+        writer.writerow([
+            b("SYSTEM_NAME"),
+            b("DISPLAY_NAME"),
+            b("STATE"),
+            b("START_NAME"),
+            b("START_TYPE")
+        ])
     for svc in services:
         writer.writerow([
-            system_name,
-            svc.get('DISPLAY_NAME', ''),
-            svc.get('STATE', ''),
-            svc.get('START_NAME', ''),
-            svc.get('START_TYPE', '')
+            b(system_name),
+            b(svc.get('DISPLAY_NAME', '')),
+            b(svc.get('STATE', '')),
+            b(svc.get('START_NAME', '')),
+            b(svc.get('START_TYPE', ''))
         ])
