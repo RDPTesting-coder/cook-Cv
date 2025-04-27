@@ -2,13 +2,7 @@ import subprocess
 import sys
 import csv
 import os
-
-if sys.version_info[0] == 2:
-    from StringIO import StringIO
-    import xml.etree.ElementTree as ET
-else:
-    from io import StringIO
-    import xml.etree.ElementTree as ET
+import re
 
 PY2 = sys.version_info[0] == 2
 
@@ -20,56 +14,47 @@ def b(text):
 
 appcmd = r"C:\Windows\System32\inetsrv\appcmd.exe"
 
-def list_apppool_names():
-    cmd = [appcmd, 'list', 'apppool', '/text:name']
+def get_apppools():
+    cmd = [appcmd, 'list', 'apppool', '/text:*']
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
+    
     if PY2:
         stdout = stdout.decode('utf-8', 'ignore')
     else:
         stdout = stdout.decode('utf-8', 'ignore')
-    apppool_names = stdout.strip().splitlines()
-    return apppool_names
-
-def get_apppool_details(name):
-    cmd = [appcmd, 'list', 'apppool', name, '/xml']
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if PY2:
-        stdout = stdout.decode('utf-8', 'ignore')
-    else:
-        stdout = stdout.decode('utf-8', 'ignore')
-
-    tree = ET.parse(StringIO(stdout))
-    root = tree.getroot()
-
-    pm = root.find('.//processModel')
-    if pm is not None:
-        identityType = pm.attrib.get('identityType', '')
-        userName = pm.attrib.get('userName', '')
-    else:
-        identityType = ''
-        userName = ''
-    return identityType, userName
-
-def get_apppools_full():
+    
     apppools = []
-    apppool_names = list_apppool_names()
-    for name in apppool_names:
-        identityType, userName = get_apppool_details(name)
-        apppools.append({
-            'APPPOOL_NAME': name,
-            'IDENTITY_TYPE': identityType,
-            'USER_NAME': userName
-        })
+    current_pool = {}
+
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('APPPOOL.NAME:'):
+            # save previous
+            if current_pool:
+                apppools.append(current_pool)
+                current_pool = {}
+            current_pool['APPPOOL_NAME'] = line.split(':', 1)[1].strip()
+        elif line.startswith('processModel.identityType:'):
+            current_pool['IDENTITY_TYPE'] = line.split(':', 1)[1].strip()
+        elif line.startswith('processModel.userName:'):
+            current_pool['USER_NAME'] = line.split(':', 1)[1].strip()
+    
+    # append last one
+    if current_pool:
+        apppools.append(current_pool)
+    
     return apppools
 
-# === Save to CSV ===
+# === Output file
 apppool_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_apppools.csv'
 file_exists = os.path.exists(apppool_csv_path)
 
-apppools = get_apppools_full()
+apppools = get_apppools()
 
+# === Save to CSV
 if PY2:
     f = open(apppool_csv_path, "ab")
 else:
@@ -80,4 +65,8 @@ with f:
     if not file_exists:
         writer.writerow([b('APPPOOL_NAME'), b('IDENTITY_TYPE'), b('USER_NAME')])
     for apppool in apppools:
-        writer.writerow([b(apppool['APPPOOL_NAME']), b(apppool['IDENTITY_TYPE']), b(apppool['USER_NAME'])])
+        writer.writerow([
+            b(apppool.get('APPPOOL_NAME', '')),
+            b(apppool.get('IDENTITY_TYPE', '')),
+            b(apppool.get('USER_NAME', ''))
+        ])
