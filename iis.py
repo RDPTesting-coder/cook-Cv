@@ -1,7 +1,7 @@
-import os
-import sys
-import csv
 import subprocess
+import csv
+import sys
+import os
 
 # Python 3/2 compatibility
 PY2 = sys.version_info[0] == 2
@@ -17,98 +17,84 @@ def b(text):
     else:
         return text
 
-# === Function to fetch Application Pools ===
-def get_app_pools():
-    pools = []
-    cmd = 'cscript //Nologo %windir%\\system32\\inetsrv\\appcmd.vbs list apppool /text:name,processModel.identityType,processModel.userName'
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    stdout, stderr = process.communicate()
-    
-    if PY2:
-        try:
-            stdout = stdout.decode('utf-8')
-        except:
-            stdout = stdout.decode('latin1')
-    else:
-        stdout = stdout.decode('utf-8')
+# Path to appcmd
+appcmd_path = r"C:\Windows\System32\inetsrv\appcmd.exe"
 
-    lines = stdout.strip().splitlines()
-    for line in lines:
-        parts = [p.strip() for p in line.split(',')]
+def get_apppools():
+    cmd = [appcmd_path, 'list', 'apppool', '/text:name,processModel.identityType,processModel.userName']
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    if PY2:
+        stdout = stdout.decode('utf-8', 'ignore')
+    else:
+        stdout = stdout.decode('utf-8', 'ignore')
+
+    apppools = []
+    for line in stdout.strip().splitlines():
+        parts = line.strip().split(',')
         if len(parts) >= 3:
-            pools.append({
-                'AppPoolName': parts[0],
-                'IdentityType': parts[1],
-                'UserName': parts[2]
+            apppools.append({
+                'APPPOOL_NAME': parts[0].strip(),
+                'IDENTITY_TYPE': parts[1].strip(),
+                'USER_NAME': parts[2].strip()
             })
-    return pools
+    return apppools
 
-# === Function to fetch Sites ===
 def get_sites():
-    sites = []
-    cmd = 'cscript //Nologo %windir%\\system32\\inetsrv\\appcmd.vbs list site /text:name,id,state,bindings,applications'
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    cmd = [appcmd_path, 'list', 'site', '/text:name,id,state,bindings']
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-    
-    if PY2:
-        try:
-            stdout = stdout.decode('utf-8')
-        except:
-            stdout = stdout.decode('latin1')
-    else:
-        stdout = stdout.decode('utf-8')
 
-    lines = stdout.strip().splitlines()
-    for line in lines:
-        parts = [p.strip() for p in line.split(',')]
-        if len(parts) >= 5:
+    if PY2:
+        stdout = stdout.decode('utf-8', 'ignore')
+    else:
+        stdout = stdout.decode('utf-8', 'ignore')
+
+    sites = []
+    for line in stdout.strip().splitlines():
+        parts = line.strip().split(',')
+        if len(parts) >= 4:
             sites.append({
-                'SiteName': parts[0],
-                'SiteID': parts[1],
-                'State': parts[2],
-                'Bindings': parts[3],
-                'Applications': parts[4]
+                'SITE_NAME': parts[0].strip(),
+                'SITE_ID': parts[1].strip(),
+                'STATE': parts[2].strip(),
+                'BINDINGS': parts[3].strip()
             })
     return sites
 
-# === Main execution ===
-app_pools = get_app_pools()
+# === Output Files ===
+apppool_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_apppools.csv'
+site_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_sites.csv'
+
+# === Write AppPools CSV ===
+apppools = get_apppools()
+file_exists = os.path.exists(apppool_csv_path)
+
+if PY2:
+    f = open(apppool_csv_path, "ab")
+else:
+    f = open(apppool_csv_path, "a", newline='', encoding='utf-8')
+
+with f:
+    writer = csv.writer(f)
+    if not file_exists:
+        writer.writerow([b('APPPOOL_NAME'), b('IDENTITY_TYPE'), b('USER_NAME')])
+    for apppool in apppools:
+        writer.writerow([b(apppool['APPPOOL_NAME']), b(apppool['IDENTITY_TYPE']), b(apppool['USER_NAME'])])
+
+# === Write Sites CSV ===
 sites = get_sites()
+file_exists = os.path.exists(site_csv_path)
 
-# === Write output to CSV ===
-file_path_pools = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_app_pools.csv'
-file_path_sites = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_sites.csv'
-
-# Write App Pools
-file_exists = os.path.exists(file_path_pools)
 if PY2:
-    f = open(file_path_pools, "ab")
+    f = open(site_csv_path, "ab")
 else:
-    f = open(file_path_pools, "a", newline='', encoding='utf-8')
+    f = open(site_csv_path, "a", newline='', encoding='utf-8')
 
 with f:
     writer = csv.writer(f)
     if not file_exists:
-        writer.writerow([b("AppPoolName"), b("IdentityType"), b("UserName")])
-    for app in app_pools:
-        writer.writerow([b(app['AppPoolName']), b(app['IdentityType']), b(app['UserName'])])
-
-# Write Sites
-file_exists = os.path.exists(file_path_sites)
-if PY2:
-    f = open(file_path_sites, "ab")
-else:
-    f = open(file_path_sites, "a", newline='', encoding='utf-8')
-
-with f:
-    writer = csv.writer(f)
-    if not file_exists:
-        writer.writerow([b("SiteName"), b("SiteID"), b("State"), b("Bindings"), b("Applications")])
+        writer.writerow([b('SITE_NAME'), b('SITE_ID'), b('STATE'), b('BINDINGS')])
     for site in sites:
-        writer.writerow([
-            b(site['SiteName']),
-            b(site['SiteID']),
-            b(site['State']),
-            b(site['Bindings']),
-            b(site['Applications'])
-        ])
+        writer.writerow([b(site['SITE_NAME']), b(site['SITE_ID']), b(site['STATE']), b(site['BINDINGS'])])
