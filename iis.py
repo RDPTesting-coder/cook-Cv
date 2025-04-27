@@ -1,15 +1,16 @@
 import subprocess
-import csv
 import sys
+import csv
 import os
 
-# Python 3/2 compatibility
-PY2 = sys.version_info[0] == 2
-
-if PY2:
+if sys.version_info[0] == 2:
     from StringIO import StringIO
+    import xml.etree.ElementTree as ET
 else:
     from io import StringIO
+    import xml.etree.ElementTree as ET
+
+PY2 = sys.version_info[0] == 2
 
 def b(text):
     if PY2:
@@ -18,56 +19,65 @@ def b(text):
         return text
 
 # Path to appcmd
-appcmd_path = r"C:\Windows\System32\inetsrv\appcmd.exe"
+appcmd = r"C:\Windows\System32\inetsrv\appcmd.exe"
 
 def get_apppools():
-    cmd = [appcmd_path, 'list', 'apppool', '/text:name,processModel.identityType,processModel.userName']
+    cmd = [appcmd, 'list', 'apppool', '/xml']
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-
     if PY2:
         stdout = stdout.decode('utf-8', 'ignore')
     else:
         stdout = stdout.decode('utf-8', 'ignore')
+    tree = ET.parse(StringIO(stdout))
+    root = tree.getroot()
 
     apppools = []
-    for line in stdout.strip().splitlines():
-        parts = line.strip().split(',')
-        if len(parts) >= 3:
-            apppools.append({
-                'APPPOOL_NAME': parts[0].strip(),
-                'IDENTITY_TYPE': parts[1].strip(),
-                'USER_NAME': parts[2].strip()
-            })
+    for apppool in root.findall('.//APPPOOL'):
+        name = apppool.attrib.get('APPPOOL.NAME', '')
+        identityType = apppool.find('processModel').attrib.get('identityType', '')
+        userName = apppool.find('processModel').attrib.get('userName', '')
+        apppools.append({
+            'APPPOOL_NAME': name,
+            'IDENTITY_TYPE': identityType,
+            'USER_NAME': userName
+        })
     return apppools
 
 def get_sites():
-    cmd = [appcmd_path, 'list', 'site', '/text:name,id,state,bindings']
+    cmd = [appcmd, 'list', 'site', '/xml']
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-
     if PY2:
         stdout = stdout.decode('utf-8', 'ignore')
     else:
         stdout = stdout.decode('utf-8', 'ignore')
+    tree = ET.parse(StringIO(stdout))
+    root = tree.getroot()
 
     sites = []
-    for line in stdout.strip().splitlines():
-        parts = line.strip().split(',')
-        if len(parts) >= 4:
-            sites.append({
-                'SITE_NAME': parts[0].strip(),
-                'SITE_ID': parts[1].strip(),
-                'STATE': parts[2].strip(),
-                'BINDINGS': parts[3].strip()
-            })
+    for site in root.findall('.//SITE'):
+        name = site.attrib.get('SITE.NAME', '')
+        id = site.attrib.get('id', '')
+        state = site.attrib.get('state', '')
+        bindings = []
+        for binding in site.findall('bindings/binding'):
+            binding_info = binding.attrib.get('bindingInformation', '')
+            protocol = binding.attrib.get('protocol', '')
+            bindings.append(protocol + "://" + binding_info)
+        sites.append({
+            'SITE_NAME': name,
+            'SITE_ID': id,
+            'STATE': state,
+            'BINDINGS': ";".join(bindings)
+        })
     return sites
 
-# === Output Files ===
+# === Output CSV paths ===
 apppool_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_apppools.csv'
 site_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_sites.csv'
 
-# === Write AppPools CSV ===
+# === Write AppPools ===
 apppools = get_apppools()
 file_exists = os.path.exists(apppool_csv_path)
 
@@ -83,7 +93,7 @@ with f:
     for apppool in apppools:
         writer.writerow([b(apppool['APPPOOL_NAME']), b(apppool['IDENTITY_TYPE']), b(apppool['USER_NAME'])])
 
-# === Write Sites CSV ===
+# === Write Sites ===
 sites = get_sites()
 file_exists = os.path.exists(site_csv_path)
 
