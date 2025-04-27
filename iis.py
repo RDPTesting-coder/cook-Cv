@@ -35,14 +35,20 @@ def get_apppools():
     apppools = []
     for apppool in root.findall('.//APPPOOL'):
         name = apppool.attrib.get('APPPOOL.NAME', '')
-        identityType = apppool.find('processModel').attrib.get('identityType', '')
-        userName = apppool.find('processModel').attrib.get('userName', '')
+        pm = apppool.find('processModel')
+        if pm is not None:
+            identityType = pm.attrib.get('identityType', '')
+            userName = pm.attrib.get('userName', '')
+        else:
+            identityType = ''
+            userName = ''
         apppools.append({
             'APPPOOL_NAME': name,
             'IDENTITY_TYPE': identityType,
             'USER_NAME': userName
         })
     return apppools
+
 
 def get_sites():
     cmd = [appcmd, 'list', 'site', '/xml']
