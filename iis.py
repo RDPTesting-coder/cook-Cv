@@ -1,116 +1,83 @@
 import subprocess
-import sys
-import csv
 import os
+import socket
+import csv
+import sys
 
-if sys.version_info[0] == 2:
-    from StringIO import StringIO
-    import xml.etree.ElementTree as ET
-else:
-    from io import StringIO
-    import xml.etree.ElementTree as ET
+def get_iis_applications():
+    try:
+        iis_directory = r"C:\Windows\System32\inetsrv"
+        os.chdir(iis_directory)
 
-PY2 = sys.version_info[0] == 2
+        server_name = socket.gethostname()
 
-def b(text):
-    if PY2:
-        return text.encode('utf-8') if isinstance(text, unicode) else text
-    else:
-        return text
-
-# Path to appcmd
-appcmd = r"C:\Windows\System32\inetsrv\appcmd.exe"
-
-def get_apppools():
-    cmd = [appcmd, 'list', 'apppool', '/xml']
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if PY2:
-        stdout = stdout.decode('utf-8', 'ignore')
-    else:
-        stdout = stdout.decode('utf-8', 'ignore')
-    tree = ET.parse(StringIO(stdout))
-    root = tree.getroot()
-
-    apppools = []
-    for apppool in root.findall('.//APPPOOL'):
-        name = apppool.attrib.get('APPPOOL.NAME', '')
-        pm = apppool.find('processModel')
-        if pm is not None:
-            identityType = pm.attrib.get('identityType', '')
-            userName = pm.attrib.get('userName', '')
+        cmd = ['appcmd', 'list', 'app', '/text:*']
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            raise Exception("Error running appcmd list app: {}".format(stderr.strip()))
+        
+        if sys.version_info[0] == 2:
+            stdout = stdout.decode('utf-8', 'ignore')
         else:
-            identityType = ''
-            userName = ''
-        apppools.append({
-            'APPPOOL_NAME': name,
-            'IDENTITY_TYPE': identityType,
-            'USER_NAME': userName
-        })
-    return apppools
+            stdout = stdout.decode('utf-8', 'ignore')
 
+        apps = []
+        current_app = {}
 
-def get_sites():
-    cmd = [appcmd, 'list', 'site', '/xml']
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if PY2:
-        stdout = stdout.decode('utf-8', 'ignore')
-    else:
-        stdout = stdout.decode('utf-8', 'ignore')
-    tree = ET.parse(StringIO(stdout))
-    root = tree.getroot()
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
 
-    sites = []
-    for site in root.findall('.//SITE'):
-        name = site.attrib.get('SITE.NAME', '')
-        id = site.attrib.get('id', '')
-        state = site.attrib.get('state', '')
-        bindings = []
-        for binding in site.findall('bindings/binding'):
-            binding_info = binding.attrib.get('bindingInformation', '')
-            protocol = binding.attrib.get('protocol', '')
-            bindings.append(protocol + "://" + binding_info)
-        sites.append({
-            'SITE_NAME': name,
-            'SITE_ID': id,
-            'STATE': state,
-            'BINDINGS': ";".join(bindings)
-        })
-    return sites
+            if line.startswith('APP.NAME:'):
+                if current_app:
+                    apps.append(current_app)
+                    current_app = {}
+                current_app['APP_NAME'] = line.split(':', 1)[1].strip()
+            elif line.startswith('APPPOOL.NAME:'):
+                current_app['APPPOOL_NAME'] = line.split(':', 1)[1].strip()
+            elif line.startswith('physicalPath:'):
+                current_app['PHYSICAL_PATH'] = line.split(':', 1)[1].strip()
+        
+        if current_app:
+            apps.append(current_app)
 
-# === Output CSV paths ===
-apppool_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_apppools.csv'
-site_csv_path = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_sites.csv'
+        # Output path
+        output_csv = r'\\FXQA03-NAS2\geomartqa-fs01\data\GeoMart_Code\job\old\iis_applications.csv'
+        file_exists = os.path.exists(output_csv)
 
-# === Write AppPools ===
-apppools = get_apppools()
-file_exists = os.path.exists(apppool_csv_path)
+        if sys.version_info[0] == 2:
+            f = open(output_csv, "ab")
+        else:
+            f = open(output_csv, "a", newline='', encoding='utf-8')
 
-if PY2:
-    f = open(apppool_csv_path, "ab")
-else:
-    f = open(apppool_csv_path, "a", newline='', encoding='utf-8')
+        with f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["SERVER_NAME", "SITE_NAME", "APP_PATH", "PHYSICAL_PATH", "APPPOOL_NAME"])
 
-with f:
-    writer = csv.writer(f)
-    if not file_exists:
-        writer.writerow([b('APPPOOL_NAME'), b('IDENTITY_TYPE'), b('USER_NAME')])
-    for apppool in apppools:
-        writer.writerow([b(apppool['APPPOOL_NAME']), b(apppool['IDENTITY_TYPE']), b(apppool['USER_NAME'])])
+            for app in apps:
+                full_name = app.get('APP_NAME', '')   # eg: Default Web Site/VirtualDirectory
+                if '/' in full_name:
+                    site_name, app_path = full_name.split('/', 1)
+                    app_path = '/' + app_path
+                else:
+                    site_name = full_name
+                    app_path = '/'
+                
+                writer.writerow([
+                    server_name,
+                    site_name,
+                    app_path,
+                    app.get('PHYSICAL_PATH', ''),
+                    app.get('APPPOOL_NAME', '')
+                ])
 
-# === Write Sites ===
-sites = get_sites()
-file_exists = os.path.exists(site_csv_path)
+        print("IIS Application information successfully saved to CSV!")
 
-if PY2:
-    f = open(site_csv_path, "ab")
-else:
-    f = open(site_csv_path, "a", newline='', encoding='utf-8')
+    except Exception as e:
+        print("An error occurred: {}".format(e))
 
-with f:
-    writer = csv.writer(f)
-    if not file_exists:
-        writer.writerow([b('SITE_NAME'), b('SITE_ID'), b('STATE'), b('BINDINGS')])
-    for site in sites:
-        writer.writerow([b(site['SITE_NAME']), b(site['SITE_ID']), b(site['STATE']), b(site['BINDINGS'])])
+get_iis_applications()
