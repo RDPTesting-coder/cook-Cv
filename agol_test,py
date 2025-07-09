@@ -1,18 +1,15 @@
-from arcgis.gis import GIS
+from arcgis.features import FeatureLayer
 from datetime import datetime
 
-# Connect
-gis = GIS("https://www.arcgis.com", "your_admin_username", "your_password")
+# Replace with the URL of one of the layers from the Web Map
+layer_url = "https://services.arcgis.com/.../FeatureServer/0"
+layer = FeatureLayer(layer_url)
 
-# Get the layer
-item = gis.content.get("your_item_id")
-layer = item.layers[0]
+# Query edits from 2021
+where_clause = "last_edited_date >= TIMESTAMP '2021-01-01 00:00:00'"
+edits = layer.query(where=where_clause, out_fields="last_edited_user, last_edited_date", return_geometry=False)
 
-# Query edits since 2021
-where = "last_edited_date >= TIMESTAMP '2021-01-01 00:00:00'"
-edits = layer.query(where=where, out_fields="last_edited_user, last_edited_date", return_geometry=False)
-
-# Print who edited and when
+# Print editors
 users = set()
 for feat in edits.features:
     user = feat.attributes['last_edited_user']
@@ -20,5 +17,5 @@ for feat in edits.features:
     users.add(user)
     print(f"{user} edited on {date}")
 
-print("\n✅ Users who edited since 2021:")
+print("\n✅ Users who edited this layer since 2021:")
 print(users)
