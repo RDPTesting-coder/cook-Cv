@@ -1,0 +1,24 @@
+from arcgis.gis import GIS
+from datetime import datetime
+
+# Connect
+gis = GIS("https://www.arcgis.com", "your_admin_username", "your_password")
+
+# Get the layer
+item = gis.content.get("your_item_id")
+layer = item.layers[0]
+
+# Query edits since 2021
+where = "last_edited_date >= TIMESTAMP '2021-01-01 00:00:00'"
+edits = layer.query(where=where, out_fields="last_edited_user, last_edited_date", return_geometry=False)
+
+# Print who edited and when
+users = set()
+for feat in edits.features:
+    user = feat.attributes['last_edited_user']
+    date = feat.attributes['last_edited_date']
+    users.add(user)
+    print(f"{user} edited on {date}")
+
+print("\n✅ Users who edited since 2021:")
+print(users)
