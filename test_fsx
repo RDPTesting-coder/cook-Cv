@@ -1,0 +1,90 @@
+import os
+import re
+import boto3
+from datetime import datetime, timezone
+
+# FSx and S3 paths
+FSX_BASE = "/fsx/edgis/"
+DIVISIONS = ["ca", "da", "fa"]     # Add more divisions if needed
+
+BUCKET = "my-sync-bucket"
+S3_BASE = "edgis/"
+TIME_THRESHOLD_MINUTES = 10
+
+s3 = boto3.client("s3")
+
+# Regex to detect version numbers (e.g., file_105.csv → 105)
+VERSION_REGEX = r"(\d+)"
+
+def extract_version(filename):
+    m = re.findall(VERSION_REGEX, filename)
+    return int(m[-1]) if m else None
+
+
+def get_latest_fsx_file(fsx_path):
+    files = []
+    for root, _, f_list in os.walk(fsx_path):
+        for f in f_list:
+            version = extract_version(f)
+            if version is None:
+                continue
+            full = os.path.join(root, f)
+            mtime = datetime.fromtimestamp(os.path.getmtime(full), tz=timezone.utc)
+            files.append((version, f, full, mtime))
+
+    if not files:
+        return None
+    return max(files, key=lambda x: x[0])
+
+
+def check_s3_file(division, filename):
+    key = f"{S3_BASE}{division}/{filename}"
+    try:
+        return s3.head_object(Bucket=BUCKET, Key=key)
+    except:
+        return None
+
+
+def validate_division(division):
+    print("\n-------------------------------")
+    print(f"🔍 Checking Division: {division.upper()}")
+    print("-------------------------------")
+
+    fsx_path = os.path.join(FSX_BASE, division)
+
+    latest = get_latest_fsx_file(fsx_path)
+    if not latest:
+        print(f"❌ No versioned files found in FSx for division: {division}")
+        return
+
+    version, filename, fsx_fullpath, fsx_time = latest
+    print(f"Latest FSx File: {filename} (version {version})")
+    print(f"FSx Timestamp : {fsx_time}")
+
+    s3_meta = check_s3_file(division, filename)
+
+    if not s3_meta:
+        print(f"❌ Sync FAILED → Missing in S3: {division}/{filename}")
+        return
+
+    s3_time = s3_meta["LastModified"]
+    print(f"S3 Timestamp  : {s3_time}")
+
+    # Check time difference
+    diff_minutes = abs((s3_time - fsx_time).total_seconds() / 60)
+
+    if diff_minutes > TIME_THRESHOLD_MINUTES:
+        print(f"⚠️ DELAY → S3 is {diff_minutes:.2f} minutes behind FSx")
+    else:
+        print(f"⏱️ Time OK → Within {TIME_THRESHOLD_MINUTES}-minute window")
+
+    print("✅ PASS → Latest version and timing validated")
+
+
+def main():
+    for division in DIVISIONS:
+        validate_division(division)
+
+
+if __name__ == "__main__":
+    main()
